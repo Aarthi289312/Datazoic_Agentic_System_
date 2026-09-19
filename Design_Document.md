@@ -494,7 +494,25 @@ This workflow allows the same architecture to support simple requests as well as
 The prototype was implemented from scratch using Python to keep the architecture simple, transparent, and easy to demonstrate. This avoids unnecessary framework complexity during the assessment.
 
 For a production system with hundreds or thousands of tools, LangGraph can be introduced for workflow orchestration, a vector database can support semantic tool discovery, and FastAPI can expose the agent as a scalable API service.
-## 16. Prototype Implementation
+## 16. Observability
+
+Observability is important for monitoring an agentic system, especially when the number of tools becomes large.
+
+In a production implementation, an observability platform such as LangSmith or OpenTelemetry can be integrated to monitor:
+
+- User requests
+- Tool discovery and routing decisions
+- Selected tools
+- Tool execution latency
+- API failures
+- Retry attempts
+- Agent state transitions
+- Final responses
+
+These traces can help developers identify incorrect tool selection, slow API calls, repeated failures, and other issues.
+
+The current prototype does not require a separate observability platform, but the architecture allows observability to be added during production deployment.
+## 17. Prototype Implementation
 
 A Python prototype was implemented to demonstrate the Tool Registry and Tool Router.
 
@@ -523,7 +541,7 @@ Output:
 The prototype demonstrates that the agent does not need to receive the complete tool collection. Instead, the router retrieves a small set of relevant candidate tools.
 
 This approach can be extended to a much larger tool registry containing hundreds or thousands of APIs.
-## 17. Tool Execution
+## 18. Tool Execution
 
 The prototype includes a Tool Executor that simulates the execution of selected tools.
 
@@ -552,7 +570,7 @@ Execution result:
 This demonstrates the complete flow from natural-language input to tool selection and execution.
 
 In a production system, the simulated executor would be replaced by actual API calls.
-## 18. Prototype Test Results
+## 19. Prototype Test Results
 
 The prototype was tested using natural-language requests based on the assessment scenarios.
 

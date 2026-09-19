@@ -1,3 +1,11 @@
+
+import os
+import re
+import requests
+from dotenv import load_dotenv
+
+load_dotenv(r"C:\Users\hp\Desktop\Datazoic_Agentic_System\.env")
+
 # Scalable Agentic System
 # Datazoic Job Assessment
 
@@ -245,6 +253,112 @@ def system_search(query):
 # -----------------------------
 # TOOL EXECUTOR
 # -----------------------------
+# -----------------------------
+# PAYPAL API
+# -----------------------------
+
+def get_paypal_access_token():
+
+    client_id = os.getenv("PAYPAL_CLIENT_ID")
+    client_secret = os.getenv("PAYPAL_CLIENT_SECRET")
+    base_url = os.getenv("PAYPAL_BASE_URL")
+
+    response = requests.post(
+        f"{base_url}/v1/oauth2/token",
+        auth=(client_id, client_secret),
+        headers={
+            "Accept": "application/json",
+            "Accept-Language": "en_US"
+        },
+        data={
+            "grant_type": "client_credentials"
+        }
+    )
+
+    response.raise_for_status()
+
+    token_data = response.json()
+
+
+    return token_data["access_token"]
+
+def create_paypal_invoice(amount, currency="USD", recipient_email="customer@example.com"):
+
+    access_token = get_paypal_access_token()
+    base_url = os.getenv("PAYPAL_BASE_URL")
+
+    invoice_data = {
+        "detail": {
+            "currency_code": currency,
+            "note": "Invoice created by Datazoic Agentic System",
+            "payment_term": {
+                "term_type": "DUE_ON_RECEIPT"
+            }
+        },
+        "invoicer": {
+            "name": {
+                "given_name": "Datazoic",
+                "surname": "System"
+            },
+            "email_address": os.getenv("PAYPAL_INVOICER_EMAIL")
+        },
+        "primary_recipients": [
+            {
+                "billing_info": {
+                    "email_address": recipient_email
+                }
+            }
+        ],
+        "items": [
+            {
+                "name": "Agentic System Service",
+                "quantity": "1",
+                "unit_amount": {
+                    "currency_code": currency,
+                    "value": amount
+                }
+            }
+        ]
+    }
+
+    response = requests.post(
+        f"{base_url}/v2/invoicing/invoices",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/json"
+        },
+        json=invoice_data
+)
+    if not response.ok:
+        print("PayPal Error Status:", response.status_code)
+        print("PayPal Error Response:", response.text)
+
+
+    response.raise_for_status()
+    return response.json()
+def send_paypal_invoice(invoice_id):
+
+    access_token = get_paypal_access_token()
+    base_url = os.getenv("PAYPAL_BASE_URL")
+
+    response = requests.post(
+        f"{base_url}/v2/invoicing/invoices/{invoice_id}/send",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/json"
+        },
+        json={
+            "send_to_recipient": True,
+            "send_to_invoicer": False
+        }
+    )
+
+    response.raise_for_status()
+
+    return True
+
 def validate_parameters(tool_name, user_request):
 
     request = user_request.lower()
@@ -280,64 +394,75 @@ def execute_tool_sequence(state):
 
     if "send" in request and "invoice" in request:
 
-        steps = [
+        print("\nExecuting: create_invoice")
+
+        if not validate_parameters(
             "create_invoice",
-            "send_invoice"
-        ]
+            state.user_request
+        ):
+            state.status = "FAILED"
+            state.error = "Missing invoice amount."
+            return None
 
-        results = []
+        # Step 1: Create invoice using PayPal
+        invoice = execute_tool(
+            "create_invoice",
+            state.user_request
+        )
 
-        for tool_name in steps:
+        if invoice is None:
+            state.status = "FAILED"
+            state.error = "PayPal invoice creation failed."
+            return None
 
-            print(f"\nExecuting: {tool_name}")
+        invoice_id = invoice.get("id")
 
-            max_retries = 2
-            result = None
+        if not invoice_id:
+            invoice_url = invoice.get("href", "")
 
-            for attempt in range(max_retries + 1):
+            if "/invoices/" in invoice_url:
+               invoice_id = invoice_url.split("/invoices/")[-1]
 
-                if not validate_parameters(
-                    tool_name,
-                    state.user_request
-                ):
-                    state.status = "FAILED"
-                    state.error = (
-                        f"Missing or invalid parameters "
-                        f"for {tool_name}."
-                    )
-                    return results
+        if not invoice_id:
+            state.status = "FAILED"
+            state.error = "PayPal did not return an invoice ID."
+            return None
 
-                result = execute_tool(
-                    tool_name,
-                    state.user_request
-                )
+        print(f"PayPal Invoice ID: {invoice_id}")
 
-                if result is not None:
-                    break
+        # Step 2: Send invoice using PayPal
+        print("\nExecuting: send_invoice")
 
-                print(f"Attempt {attempt + 1} failed.")
+        try:
+            send_paypal_invoice(invoice_id)
 
-                if attempt < max_retries:
-                    print("Retrying...")
-
-            if result is None:
-                state.status = "FAILED"
-                state.error = (
-                    f"Execution failed for {tool_name} "
-                    f"after {max_retries} retries."
-                )
-                return results
-
-            results.append(
-                f"{tool_name}: {result}"
+            send_result = (
+                f"Invoice {invoice_id} sent successfully."
             )
 
-        state.selected_tool = "create_invoice → send_invoice"
-        state.tool_result = results
+        except requests.exceptions.RequestException as error:
+
+            state.status = "FAILED"
+            state.error = (
+                f"PayPal invoice sending failed: {error}"
+            )
+            return None
+
+        state.selected_tool = (
+            "create_invoice → send_invoice"
+        )
+
+        state.tool_result = [
+            f"create_invoice: Invoice created successfully. "
+            f"Invoice ID: {invoice_id}",
+            f"send_invoice: {send_result}"
+        ]
+
         state.status = "COMPLETED"
 
-        return results
+        return state.tool_result
 
+    # Normal single-tool execution
     state.selected_tool = (
         state.selected_tools[0]["name"]
     )
@@ -356,23 +481,37 @@ def execute_tool_sequence(state):
 
     return result
 
-
 def execute_tool(tool_name, user_request):
 
     if tool_name == "create_invoice":
-     import re
 
-     match = re.search(r"\$(\d+(?:\.\d+)?)", user_request)
+        match = re.search(r"\$(\d+(?:\.\d+)?)", user_request)
 
-     if match:
+        if not match:
+            return None
+
         amount = match.group(1)
-     else:
-        amount = "0"
 
-     return f"Invoice created successfully for ${amount}."
+        email_match = re.search(
+            r"[\w\.-]+@[\w\.-]+\.\w+",
+            user_request
+        )
+
+        if email_match:
+            recipient_email = email_match.group()
+        else:
+            recipient_email = "customer@example.com"
+
+        invoice = create_paypal_invoice(
+            amount=amount,
+            recipient_email=recipient_email
+        )
+
+        return invoice
+
     elif tool_name == "send_invoice":
 
-        return "Invoice sent successfully to the customer."
+        return None
 
     elif tool_name == "get_invoice":
 
@@ -391,7 +530,6 @@ def execute_tool(tool_name, user_request):
         return "Payment refund processed successfully."
 
     return None
-    
 
 
 # -----------------------------
